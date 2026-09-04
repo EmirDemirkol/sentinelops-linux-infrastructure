@@ -1,0 +1,10 @@
+[Unit]
+Description=Run SentinelOps backup daily
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+Unit=sentinelops-backup.service
+
+[Install]
+WantedBy=timers.target
