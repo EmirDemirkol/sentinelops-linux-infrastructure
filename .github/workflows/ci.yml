@@ -1,0 +1,97 @@
+name: SentinelOps CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  shell-validation:
+    name: Shell validation
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install ShellCheck
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y shellcheck
+
+      - name: Validate Bash syntax
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t scripts < <(
+            find provision \
+              -type f \
+              -name '*.sh' \
+              -print |
+              sort
+          )
+
+          if (( ${#scripts[@]} == 0 )); then
+            echo "ERROR: No shell scripts were found."
+            exit 1
+          fi
+
+          for script in "${scripts[@]}"; do
+            echo "Checking Bash syntax: ${script}"
+            bash -n "$script"
+          done
+
+          echo "Bash syntax validation passed for ${#scripts[@]} script(s)."
+
+      - name: Run ShellCheck
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          mapfile -t scripts < <(
+            find provision \
+              -type f \
+              -name '*.sh' \
+              -print |
+              sort
+          )
+
+          if (( ${#scripts[@]} == 0 )); then
+            echo "ERROR: No shell scripts were found."
+            exit 1
+          fi
+
+          shellcheck "${scripts[@]}"
+
+  secret-safety:
+    name: Secret safety
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Scan tracked files for prohibited secret patterns
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          pattern='BEGIN (RSA|OPENSSH|EC|DSA) PRIVATE KEY|password[[:space:]]*=|token[[:space:]]*=|secret[[:space:]]*='
+
+          matches="$(
+            git grep -IlE "$pattern" -- . || true
+          )"
+
+          if [[ -n "$matches" ]]; then
+            echo "ERROR: Prohibited secret-like content detected in tracked file(s):"
+            printf '%s\n' "$matches"
+            echo "The matching content is intentionally not printed."
+            exit 1
+          fi
+
+          echo "Secret-pattern validation passed."
