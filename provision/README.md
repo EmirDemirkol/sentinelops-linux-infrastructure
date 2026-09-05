@@ -8,7 +8,7 @@ The provisioning workflow translates infrastructure that was originally configur
 
 SEN-024 established the clean-host repeatable provisioning baseline.
 
-SEN-025 hardens that baseline by adding:
+SEN-025 hardened that baseline by adding:
 
 ```text
 idempotent repeated execution
@@ -18,6 +18,8 @@ conditional initial-backup behavior
 explicit existing-state validation
 ```
 
+SEN-026 adds the first GitHub Actions continuous-integration baseline for automated repository validation.
+
 The provisioning workflow is designed to support both:
 
 ```text
@@ -26,6 +28,8 @@ an already-provisioned valid SentinelOps host
 ```
 
 Repeated execution should converge the host toward the intended SentinelOps state without creating duplicate firewall rules, duplicate group membership, invalid managed configuration, or unnecessary provisioning-specific backup archives.
+
+Repository changes affecting the provisioning workflow are additionally validated automatically through GitHub Actions.
 
 ## Supported Environment
 
@@ -100,6 +104,8 @@ The expected externally reachable host services are:
 
 ## Repository Structure
 
+Provisioning assets are stored under:
+
 ```text
 provision/
 ├── README.md
@@ -122,9 +128,15 @@ provision/
     └── sentinelops-backup.timer
 ```
 
+Repository-level CI configuration is stored separately at:
+
+```text
+.github/workflows/ci.yml
+```
+
 ## Requirements Covered
 
-The provisioning baseline primarily addresses:
+The provisioning and automation baseline currently provides implementation and validation evidence for:
 
 ```text
 FR-41: Manual Understanding Before Automation
@@ -132,11 +144,19 @@ FR-42: Repeatable Provisioning
 FR-43: Idempotent Automation
 FR-44: Automation Validation
 FR-45: Useful Automation Failures
+FR-46: Continuous Integration
+FR-47: Shell Validation
+FR-50: Secret Protection
 ```
 
-SEN-024 established FR-41 and FR-42.
+SEN-024 established:
 
-SEN-025 adds implementation and runtime evidence for:
+```text
+FR-41
+FR-42
+```
+
+SEN-025 established:
 
 ```text
 FR-43
@@ -144,14 +164,22 @@ FR-44
 FR-45
 ```
 
-Continuous-integration requirements remain separate work:
+SEN-026 establishes:
 
 ```text
 FR-46
 FR-47
-FR-48
-FR-49
+FR-50
 ```
+
+Remaining CI requirements are:
+
+```text
+FR-48: Container Validation
+FR-49: Application Testing
+```
+
+These remain separate follow-up work.
 
 ## Prerequisites
 
@@ -369,6 +397,8 @@ bash -n provision/scripts/provision.sh
 ```
 
 A syntax-invalid managed operational script is therefore not intentionally deployed by a successful preflight.
+
+GitHub Actions additionally performs automated syntax and ShellCheck validation against repository shell scripts before merge.
 
 ## Filesystem Capacity Validation
 
@@ -1489,172 +1519,393 @@ Public SSH keys remain host-specific prerequisites and are not embedded into the
 
 The provisioning preflight verifies public-key readiness without distributing or storing private authentication material.
 
-## Repeatability Model
+SEN-026 additionally introduces automated GitHub Actions secret-pattern validation for tracked repository files.
 
-SentinelOps uses practical infrastructure idempotency.
-
-This does not mean every repeated command performs zero work.
-
-Repeated provisioning may still perform operations such as:
+The CI secret-safety job checks for obvious prohibited secret-like content including:
 
 ```text
-apt-get update
-Docker repository metadata refresh
-managed file installation
-Nginx validation and restart
-Docker Compose build evaluation
-UFW existing-rule evaluation
+private-key header patterns
+obvious password assignments
+obvious token assignments
+obvious secret assignments
 ```
 
-The required property is convergence.
+When suspicious content is detected, CI reports affected file paths without intentionally printing the matching value.
 
-Repeated execution should result in the same intended architecture and security state without accumulating invalid or duplicated configuration.
+The CI workflow itself requires no production credentials.
 
-## Idempotency Boundary
+## GitHub Actions CI
 
-The validated idempotent properties include:
+SEN-026 introduces:
 
 ```text
-no duplicate UFW rules
-no duplicate Docker group membership
-managed configuration convergence
-stable required service state
-healthy application state
-loopback-only backend binding
-preserved SSH hardening
-no unnecessary provisioning-specific backup creation
-zero failed systemd units
+.github/workflows/ci.yml
 ```
 
-The project does not claim byte-for-byte identity of every system package or transient runtime value between executions.
-
-## Transaction Boundary
-
-The provisioner does not implement a general transactional rollback engine.
-
-Once preflight has succeeded, an unpredictable later failure may occur after earlier system-changing operations have completed.
-
-Examples include:
+Workflow name:
 
 ```text
-repository outage after preflight
-package-manager failure
-unexpected filesystem failure
-service failure
-network interruption
-container build failure
+SentinelOps CI
 ```
 
-The design instead:
+The initial workflow contains:
 
 ```text
-moves known prerequisite checks before modification
-fails immediately when an operation cannot safely continue
-provides useful failure output
-validates final runtime state
+Shell validation
+Secret safety
 ```
 
-Full transactional configuration management is outside the current SentinelOps MVP scope.
+The workflow is designed to provide automated repository validation before changes are accepted.
 
-## Package Version Boundary
+## CI Triggers
 
-Exact Docker and Docker Compose package versions are not pinned.
-
-Provisioning installs the current compatible versions available from the configured package repositories.
-
-Repeated provisioning at different dates may therefore upgrade package versions if repository state has changed.
-
-Idempotency means convergence to the intended configuration and supported package state rather than permanent package-version identity.
-
-## User Creation Boundary
-
-The provisioner does not create:
+The GitHub Actions workflow runs automatically for:
 
 ```text
-emir
+pull requests
+pushes to main
 ```
 
-The administrator account remains a host prerequisite.
-
-The provisioner validates the account rather than silently creating an unexpected user.
-
-## SSH Key Boundary
-
-The provisioner does not generate or distribute SSH keys.
-
-Trusted public-key authentication must already exist before SSH password authentication is disabled.
-
-Private authentication material must remain outside the repository.
-
-## Clean-Host Compatibility
-
-SEN-024 provided the clean-host provisioning evidence.
-
-SEN-025 preserves that model while adding validation that accepts both:
+This provides:
 
 ```text
-clean expected state
-already-provisioned expected state
+pre-merge validation
+default-branch validation
 ```
 
-For example:
+The pull-request trigger was exercised directly during SEN-026.
+
+The push-to-main trigger is configured in the workflow and will run after changes reach the default branch.
+
+## CI Permissions
+
+The workflow declares:
+
+```yaml
+permissions:
+  contents: read
+```
+
+The workflow therefore uses read-only repository content access.
+
+The validation jobs do not require:
 
 ```text
-unused TCP 80 is valid on a clean host
-Nginx-owned TCP 80 is valid on a provisioned host
-
-unused TCP 8000 is valid on a clean host
-SentinelOps-owned 127.0.0.1:8000 is valid on a provisioned host
+production credentials
+private SSH keys
+deployment secrets
+cloud access credentials
+repository write permissions
 ```
 
-Unexpected conflicting state is rejected.
+## CI Shell Discovery
 
-## Manual Understanding
+The shell-validation job discovers shell scripts using the repository provisioning tree.
 
-Every major infrastructure component represented by this provisioning workflow was first configured, inspected, secured, and validated manually during earlier SentinelOps issues.
-
-The automation therefore codifies an already-understood architecture.
-
-It does not replace that understanding with an opaque configuration-management platform.
-
-This preserves the project principle:
+Current shell scripts include:
 
 ```text
-manual understanding before automation
+provision/scripts/provision.sh
+provision/monitoring/health-check.sh
+provision/backup/backup-sentinelops.sh
 ```
 
-## Configuration Management Boundary
+New `*.sh` files created under the provisioning tree are also included automatically.
 
-SentinelOps currently uses Bash-based provisioning.
+This behavior was demonstrated during the controlled SEN-026 failure test.
 
-SEN-025 does not introduce:
+## Automated Bash Syntax Validation
+
+GitHub Actions runs:
+
+```bash
+bash -n
+```
+
+against discovered provisioning shell scripts.
+
+A syntax-invalid script causes:
 
 ```text
-Ansible
-Terraform
-remote orchestration
-multi-host inventory
-configuration-management agents
+Shell validation
 ```
 
-Those technologies are not required for the current single-host MVP requirements.
+to fail with a non-zero workflow result.
 
-The existing Bash workflow is intentionally kept understandable and evidence-driven.
+During SEN-026, an intentionally malformed synthetic script was detected automatically.
 
-## Continuous Integration Boundary
+## Automated ShellCheck Validation
 
-This provisioning workflow does not itself implement GitHub Actions.
+GitHub Actions installs ShellCheck inside the GitHub-hosted Ubuntu runner.
 
-The remaining CI requirements are:
+The workflow then performs static analysis against the discovered provisioning shell scripts.
+
+ShellCheck therefore does not need to be installed on the developer Mac.
+
+## ShellCheck Finding During SEN-026
+
+The first real CI execution reported:
+
+```text
+Shell validation: FAIL
+Secret safety: PASS
+```
+
+ShellCheck identified:
+
+```text
+SC1091
+```
+
+in:
+
+```text
+provision/scripts/provision.sh
+```
+
+for a runtime source of:
+
+```text
+/etc/os-release
+```
+
+used while determining the Ubuntu release codename.
+
+The operating-system file exists on the target host but is not part of the repository checkout, so ShellCheck cannot statically follow it.
+
+## ShellCheck Resolution
+
+The finding was reviewed rather than disabled globally.
+
+A specific directive was added immediately before the relevant runtime source operation:
+
+```text
+# shellcheck disable=SC1091
+```
+
+No broad ShellCheck configuration was introduced.
+
+No unrelated warning category was suppressed.
+
+After the specific fix was pushed:
+
+```text
+Shell validation: PASS
+Secret safety: PASS
+```
+
+## Controlled SEN-026 CI Failure
+
+After establishing the first clean CI state, SEN-026 deliberately demonstrated workflow enforcement using a temporary synthetic script:
+
+```text
+provision/sen-026-ci-failure-test.sh
+```
+
+The file contained a deliberately incomplete Bash conditional.
+
+Local syntax validation returned:
+
+```text
+syntax error: unexpected end of file
+EXIT_CODE=2
+```
+
+The synthetic script contained no secret material and did not alter real SentinelOps runtime code.
+
+## Controlled CI Failure Result
+
+The temporary script was committed and pushed to the SEN-026 feature branch.
+
+GitHub Actions automatically discovered the new shell script.
+
+The resulting CI state was:
+
+```text
+Shell validation: FAIL
+Secret safety: PASS
+```
+
+The failed step identified:
+
+```text
+provision/sen-026-ci-failure-test.sh
+```
+
+and reported:
+
+```text
+syntax error: unexpected end of file
+```
+
+GitHub Actions completed the shell-validation step with:
+
+```text
+exit code 2
+```
+
+This demonstrated that invalid shell syntax is automatically rejected.
+
+## Controlled Failure Recovery
+
+After failure evidence was captured, the synthetic file was deleted.
+
+The real SentinelOps shell scripts were revalidated locally.
+
+The removal was committed and pushed.
+
+The final pull-request CI state returned to:
+
+```text
+Shell validation: PASS
+Secret safety: PASS
+```
+
+The temporary failure script does not remain in the final feature-branch working tree.
+
+## SEN-026 CI Run Sequence
+
+The important SEN-026 pull-request sequence was:
+
+```text
+Run 1
+Shell validation: FAIL
+Secret safety: PASS
+Reason: real ShellCheck SC1091 finding
+
+Run 2
+Shell validation: PASS
+Secret safety: PASS
+Reason: specific SC1091 handling applied
+
+Run 3
+Shell validation: FAIL
+Secret safety: PASS
+Reason: controlled synthetic Bash syntax failure
+
+Run 4
+Shell validation: PASS
+Secret safety: PASS
+Reason: synthetic failure removed
+```
+
+This provides both successful and failing CI evidence.
+
+## CI Commit Sequence
+
+The important SEN-026 implementation commits were:
+
+```text
+8ef73ba ci: add SEN-026 GitHub Actions foundation
+63f5c68 fix: resolve SEN-026 ShellCheck finding
+6d14acd test: demonstrate SEN-026 CI shell failure
+5a40a22 test: recover SEN-026 CI failure simulation
+```
+
+The temporary controlled-failure file was introduced and then removed through explicit Git history.
+
+## CI Authentication Boundary
+
+Creating or modifying:
+
+```text
+.github/workflows/
+```
+
+required GitHub authentication with permission to update workflow files.
+
+The original cached Git credential was rejected because it lacked the required workflow permission.
+
+A repository-scoped fine-grained Personal Access Token was then used with:
+
+```text
+Contents: Read and write
+Workflows: Read and write
+Metadata: Read-only
+```
+
+The token was restricted to the SentinelOps repository.
+
+No token value was committed to the repository.
+
+No authentication credential appears in the workflow configuration.
+
+## CI Secret Safety
+
+The Secret safety job scans tracked repository content for obvious prohibited secret-like patterns.
+
+The job is intentionally designed to identify affected files without echoing matching sensitive values.
+
+During SEN-026:
+
+```text
+Secret safety: PASS
+```
+
+on the initial run, ShellCheck-fix run, controlled-failure run, and recovery run.
+
+The controlled failure used invalid shell syntax instead of fake credentials to avoid unnecessary secret-like material in Git history.
+
+## CI Security Considerations
+
+The SEN-026 workflow does not:
+
+```text
+deploy SentinelOps
+connect to the Ubuntu VM
+modify production infrastructure
+store SSH private keys
+store cloud credentials
+require deployment secrets
+write repository contents
+```
+
+Its purpose is validation only.
+
+## CI Warning Boundary
+
+GitHub Actions emitted an external runtime compatibility warning relating to the JavaScript runtime used by the checkout action.
+
+The warning did not cause either CI job to fail.
+
+It is not treated as a SentinelOps validation failure.
+
+The checkout action should continue to be kept on an appropriate supported stable version as GitHub Actions evolves.
+
+## Remaining CI Scope
+
+SEN-026 establishes:
 
 ```text
 FR-46: Continuous Integration
 FR-47: Shell Validation
-FR-48: Docker Project Validation
-FR-49: Application Behaviour Validation
+FR-50: Secret Protection
 ```
 
-These are separate follow-up work after the provisioning automation baseline.
+The remaining CI requirements are:
+
+```text
+FR-48: Container Validation
+FR-49: Application Testing
+```
+
+Future CI work should extend:
+
+```text
+.github/workflows/ci.yml
+```
+
+rather than creating a disconnected validation system.
+
+Expected follow-up validation includes:
+
+```text
+Dockerfile validation
+Docker image build
+Docker Compose configuration parsing
+basic application runtime validation
+health endpoint behaviour
+```
 
 ## Validation Checklist
 
@@ -1685,6 +1936,15 @@ required services active
 SSH security baseline preserved
 no external TCP 8000 exposure
 no failed systemd units
+```
+
+For repository changes, also verify:
+
+```text
+GitHub Actions workflow executes
+Shell validation passes
+Secret safety passes
+required pull-request checks are green
 ```
 
 ## SEN-025 Validated Result
@@ -1721,9 +1981,37 @@ external TCP 8000 isolation: PASS
 failed systemd units: 0
 ```
 
+## SEN-026 Validated Result
+
+The SEN-026 CI validation demonstrated:
+
+```text
+GitHub Actions workflow introduced: PASS
+pull-request trigger: PASS
+push-to-main trigger configured: PASS
+read-only workflow permissions: PASS
+Bash syntax automation: PASS
+ShellCheck automation: PASS
+real ShellCheck finding detected: PASS
+SC1091 finding reviewed: PASS
+specific ShellCheck handling applied: PASS
+clean ShellCheck recovery: PASS
+secret-pattern automation: PASS
+Secret safety job: PASS
+controlled shell failure created: PASS
+controlled shell failure detected: PASS
+failing script identified: PASS
+non-zero CI result: PASS
+Secret safety remained independent: PASS
+synthetic failure removed: PASS
+final Shell validation: PASS
+final Secret safety: PASS
+pull-request branch conflicts: NONE
+```
+
 ## Requirements Status
 
-Current provisioning requirements status:
+Current provisioning and automation requirements status:
 
 ```text
 FR-41: SATISFIED
@@ -1731,8 +2019,20 @@ FR-42: SATISFIED
 FR-43: SATISFIED
 FR-44: SATISFIED
 FR-45: SATISFIED
+FR-46: SATISFIED
+FR-47: SATISFIED
+FR-50: SATISFIED
+```
+
+Remaining CI requirements:
+
+```text
+FR-48: PENDING
+FR-49: PENDING
 ```
 
 SEN-024 established the repeatable clean-host provisioning baseline.
 
-SEN-025 establishes that the SentinelOps provisioning workflow can also be executed safely against the validated already-provisioned target state, performs important prerequisite checks before modification where practical, and returns useful non-zero failure information when provisioning cannot continue safely.
+SEN-025 established safe repeated provisioning, prerequisite validation, and useful provisioning failures.
+
+SEN-026 establishes the first automated GitHub Actions repository-validation baseline, including Bash syntax checking, ShellCheck, secret-pattern safety checks, controlled CI failure detection, and clean recovery.
