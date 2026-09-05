@@ -362,6 +362,7 @@ configure_docker_repository() {
     local codename
 
     architecture="$(dpkg --print-architecture)"
+    # shellcheck disable=SC1091
     codename="$(. /etc/os-release && echo "$VERSION_CODENAME")"
 
     if [[ -z "$codename" ]]; then
