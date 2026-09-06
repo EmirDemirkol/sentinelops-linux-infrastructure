@@ -122,7 +122,6 @@ main() {
     echo " SentinelOps Health Check"
     echo "========================================"
     echo
-
     echo "Timestamp:"
     date
     echo
@@ -131,12 +130,12 @@ main() {
     uptime
 
     # Record collection failures while allowing the remaining checks to run.
-    check_system_load || true
+    check_system_load /proc/loadavg || true
     echo
 
     echo "=== MEMORY ==="
     free -h
-    check_memory_usage || true
+    check_memory_usage /proc/meminfo || true
     echo
 
     echo "=== FILESYSTEM ==="
@@ -169,7 +168,6 @@ main() {
             "INFO" \
             "Root filesystem usage is ${DISK_USAGE}%, below warning threshold of ${DISK_WARNING_THRESHOLD}%"
     fi
-
     echo
 
     echo "=== BACKUP FRESHNESS ==="
@@ -228,7 +226,6 @@ main() {
             fi
         fi
     fi
-
     echo
 
     echo "=== FAILED SYSTEMD UNITS ==="
@@ -287,7 +284,6 @@ main() {
             "CRITICAL" \
             "SSH socket is not active"
     fi
-
     echo
 
     echo "=== COMPOSE APPLICATION ==="
@@ -314,7 +310,6 @@ main() {
     echo
 
     echo "=== APPLICATION HEALTH ==="
-
     APP_HTTP_CODE="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1:8000/health || true)"
 
     if [[ "$APP_HTTP_CODE" == "200" ]]; then
@@ -334,11 +329,9 @@ main() {
             "CRITICAL" \
             "Application health endpoint returned HTTP ${APP_HTTP_CODE:-000}"
     fi
-
     echo
 
     echo "=== HOST NGINX HEALTH ==="
-
     NGINX_HTTP_CODE="$(curl -sS -o /dev/null -w "%{http_code}" http://127.0.0.1 || true)"
 
     if [[ "$NGINX_HTTP_CODE" == "200" ]]; then
@@ -358,7 +351,6 @@ main() {
             "CRITICAL" \
             "Host Nginx returned HTTP ${NGINX_HTTP_CODE:-000}"
     fi
-
     echo
 
     echo "=== LISTENING TCP PORTS ==="
