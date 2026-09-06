@@ -95,3 +95,121 @@ jobs:
           fi
 
           echo "Secret-pattern validation passed."
+
+  container-application-validation:
+    name: Container and application validation
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: provision/application
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          set -euo pipefail
+          docker --version
+          docker compose version
+
+      - name: Validate Docker Compose configuration
+        run: |
+          set -euo pipefail
+          docker compose config
+
+      - name: Validate container security configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if ! grep -Fq '127.0.0.1:8000:80' compose.yaml; then
+            echo "ERROR: Expected loopback-only port mapping was not found."
+            exit 1
+          fi
+
+          if grep -Eq '^[[:space:]]*privileged:[[:space:]]*true[[:space:]]*$' compose.yaml; then
+            echo "ERROR: Privileged container mode is not permitted."
+            exit 1
+          fi
+
+          echo "Container security configuration passed."
+
+      - name: Build SentinelOps application image
+        run: |
+          set -euo pipefail
+          docker compose build
+
+      - name: Start SentinelOps application
+        run: |
+          set -euo pipefail
+          docker compose up -d
+
+      - name: Wait for application health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for attempt in {1..30}; do
+            if curl \
+              --fail \
+              --silent \
+              http://127.0.0.1:8000/health \
+              > /tmp/sentinelops-health.json; then
+              echo "Application health endpoint is available."
+              exit 0
+            fi
+
+            echo "Waiting for application health endpoint (${attempt}/30)..."
+            sleep 2
+          done
+
+          echo "ERROR: Application health endpoint did not become available."
+          docker compose ps
+          docker compose logs
+          exit 1
+
+      - name: Validate application health response
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          status_code="$(
+            curl \
+              --silent \
+              --output /tmp/sentinelops-health.json \
+              --write-out '%{http_code}' \
+              http://127.0.0.1:8000/health
+          )"
+
+          if [[ "$status_code" != "200" ]]; then
+            echo "ERROR: Expected HTTP 200, received ${status_code}."
+            exit 1
+          fi
+
+          python3 -c '
+          import json
+          from pathlib import Path
+
+          data = json.loads(
+              Path("/tmp/sentinelops-health.json").read_text()
+          )
+
+          expected = {
+              "status": "healthy",
+              "version": "0.1.0",
+          }
+
+          if data != expected:
+              raise SystemExit(
+                  f"ERROR: Unexpected health response: {data!r}"
+              )
+
+          print("Application health response validation passed.")
+          '
+
+      - name: Stop SentinelOps application
+        if: always()
+        run: |
+          docker compose down --volumes --remove-orphans

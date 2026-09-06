@@ -31,7 +31,9 @@ The SentinelOps security baseline should:
 - preserve administrator recovery access;
 - require security controls to be tested rather than assumed;
 - require repository changes to receive automated validation where practical;
-- prevent CI workflows from introducing unnecessary credentials or permissions.
+- prevent CI workflows from introducing unnecessary credentials or permissions;
+- validate container configuration before merge;
+- validate basic application behaviour before merge.
 
 ---
 
@@ -241,6 +243,14 @@ Expected external result for TCP port 8000:
 not reachable
 ```
 
+SEN-027 additionally validates the repository Compose configuration for the expected loopback-only publication:
+
+```text
+127.0.0.1:8000:80
+```
+
+If that expected mapping is absent, the container/application CI job fails.
+
 ---
 
 # SB-11: Configuration Validation Before Reload
@@ -308,7 +318,16 @@ Purpose:
 Verification:
 
 - inspect Docker or Docker Compose configuration;
-- confirm privileged mode is not enabled.
+- confirm privileged mode is not enabled;
+- confirm CI rejects explicit privileged container configuration.
+
+SEN-027 adds automated validation that rejects:
+
+```text
+privileged: true
+```
+
+when present in the current Compose configuration.
 
 ---
 
@@ -370,9 +389,9 @@ Verification:
 - use automated CI secret-pattern validation;
 - avoid displaying potentially sensitive matching values in CI logs.
 
-SEN-026 introduces automated GitHub Actions secret-safety validation for tracked repository content.
+SEN-026 introduced automated GitHub Actions secret-safety validation for tracked repository content.
 
-The initial automated scan checks for obvious categories including:
+The automated scan checks for obvious categories including:
 
 ```text
 private-key header patterns
@@ -386,6 +405,8 @@ The CI job reports affected file paths without intentionally printing matching s
 This automated check supplements manual review.
 
 It does not replace careful secret handling.
+
+SEN-027 preserves the same Secret safety job unchanged.
 
 ---
 
@@ -485,7 +506,7 @@ Verification:
 - inspect logs during failure simulations;
 - inspect CI failure output for unnecessary sensitive-value exposure.
 
-The SEN-026 secret-safety workflow intentionally avoids printing matching secret-like content.
+The Secret safety workflow intentionally avoids printing matching secret-like content.
 
 ---
 
@@ -589,6 +610,8 @@ Verification:
 
 Controlled CI failure testing must also use synthetic and harmless content.
 
+The SEN-027 controlled application failure changed only the expected CI version value and did not introduce real data or credentials.
+
 ---
 
 # SB-26: Minimise Installed Software
@@ -627,6 +650,8 @@ The SentinelOps Docker installation uses Docker's documented Ubuntu package repo
 
 GitHub Actions currently installs ShellCheck using the GitHub-hosted Ubuntu runner package manager.
 
+Docker and Docker Compose used by SEN-027 are provided by the selected GitHub-hosted runner environment.
+
 ---
 
 # SB-28: Trusted Container Images
@@ -649,6 +674,8 @@ Current application base image:
 ```text
 nginx:alpine
 ```
+
+SEN-027 automatically verifies that the application image can be built successfully from the repository Dockerfile.
 
 ---
 
@@ -678,6 +705,7 @@ monitoring script
 backup script
 provisioning automation
 GitHub Actions workflow
+container/application CI validation
 ```
 
 ---
@@ -707,7 +735,9 @@ Verification:
 
 The repository shall use automated validation before the MVP is considered complete.
 
-SEN-026 establishes the initial GitHub Actions validation baseline.
+SEN-026 established the initial GitHub Actions validation baseline.
+
+SEN-027 extends that baseline with automated container and application validation.
 
 The workflow is stored at:
 
@@ -721,12 +751,31 @@ Workflow name:
 SentinelOps CI
 ```
 
+Current automated jobs include:
+
+```text
+Shell validation
+Secret safety
+Container and application validation
+```
+
 Current automated checks include:
 
 ```text
 Bash syntax validation
 ShellCheck static analysis
 repository secret-pattern validation
+Docker version verification
+Docker Compose version verification
+Docker Compose configuration parsing
+loopback-only port mapping validation
+privileged-mode rejection
+Docker image build
+application startup
+health endpoint availability
+HTTP 200 validation
+health JSON validation
+Compose cleanup
 ```
 
 The workflow runs automatically for:
@@ -760,16 +809,24 @@ deployment secrets
 private SSH keys
 cloud credentials
 repository write permissions
+VM login credentials
 ```
+
+The container/application CI workload runs only inside the GitHub-hosted runner.
 
 Purpose:
 
 - detect shell syntax errors before changes are accepted;
 - identify common shell quality problems;
 - detect obvious prohibited secret material;
+- detect invalid Docker Compose configuration;
+- detect unsafe container configuration assumptions;
+- verify that the SentinelOps application image builds;
+- verify that the application starts successfully;
+- verify the application health endpoint;
+- verify expected application health content;
 - expose automated validation results directly on pull requests;
-- establish automated repository checks before MVP release;
-- provide a foundation for later container and application CI validation.
+- establish automated repository, container, and application checks before MVP release.
 
 Verification:
 
@@ -777,12 +834,21 @@ Verification:
 - confirm the workflow is configured for pushes to `main`;
 - confirm Shell validation passes for valid repository state;
 - confirm Secret safety passes for valid repository state;
-- confirm an intentionally invalid synthetic shell script causes Shell validation to fail;
-- confirm the failing script is identified by CI;
-- confirm the failed validation returns a non-zero result;
-- remove the synthetic failure;
-- confirm the workflow returns to a passing state;
-- confirm final required checks are green before merge.
+- confirm Docker Compose configuration parses successfully;
+- confirm the expected loopback-only application port mapping is present;
+- confirm privileged container mode is rejected;
+- confirm the application image builds successfully;
+- confirm the Compose application starts successfully;
+- confirm `/health` becomes available;
+- confirm `/health` returns HTTP 200;
+- confirm health status is `healthy`;
+- confirm health version is `0.1.0`;
+- confirm an intentional application expectation mismatch causes CI failure;
+- confirm the failing validation is identified;
+- confirm the failed validation returns non-zero status;
+- confirm Compose cleanup still executes after failure;
+- restore the expected application response;
+- confirm all CI jobs return to a passing state before merge.
 
 SEN-026 validation demonstrated:
 
@@ -798,14 +864,44 @@ final Shell validation: PASS
 final Secret safety: PASS
 ```
 
-Remaining CI validation scope:
+SEN-027 validation demonstrated:
 
 ```text
-FR-48: Container Validation
-FR-49: Application Testing
+Docker tooling available on CI runner: PASS
+Docker Compose configuration: PASS
+loopback-only mapping validation: PASS
+privileged-mode validation: PASS
+Docker image build: PASS
+application startup: PASS
+health endpoint availability: PASS
+HTTP 200 validation: PASS
+health status validation: PASS
+health version validation: PASS
+controlled application mismatch: DETECTED
+application CI failure result: PASS
+controlled application recovery: PASS
+final Container and application validation: PASS
 ```
 
-Container configuration and application behaviour validation remain separate follow-up work.
+Current CI requirement status:
+
+```text
+FR-46: SATISFIED
+FR-47: SATISFIED
+FR-48: SATISFIED
+FR-49: SATISFIED
+FR-50: SATISFIED
+```
+
+Related success criteria:
+
+```text
+SC-36: SATISFIED
+SC-37: SATISFIED
+SC-38: SATISFIED
+SC-39: SATISFIED
+SC-40: SATISFIED
+```
 
 ---
 
@@ -823,7 +919,10 @@ Examples:
 - ordinary-user permission test;
 - application-port exposure test;
 - backup checksum test;
-- repository CI validation.
+- repository CI validation;
+- Docker Compose configuration validation;
+- container security validation;
+- application health validation.
 
 Purpose:
 
@@ -850,6 +949,8 @@ Verification:
 - validate recovery after the controlled failure.
 
 CI failure tests should use synthetic repository content and must be recovered before merge.
+
+SEN-027 used an intentionally incorrect expected application version rather than damaging live infrastructure or real application configuration.
 
 ---
 
@@ -931,6 +1032,16 @@ Verification:
 - perform a controlled action;
 - identify the relevant evidence afterward.
 
+SEN-027 CI evidence includes:
+
+```text
+initial passing run
+controlled failing run
+recovery passing run
+Git commit history
+GitHub Actions job output
+```
+
 ---
 
 # SB-37: Maintain Documentation Consistency
@@ -947,7 +1058,9 @@ Verification:
 - compare implementation against security documentation before each phase closes;
 - update planned controls when they become implemented and validated.
 
-SEN-026 updates the CI baseline from planned validation to implemented GitHub Actions enforcement.
+SEN-026 updated the CI baseline from planned validation to implemented GitHub Actions enforcement.
+
+SEN-027 updates the container and application CI controls from planned to implemented and validated.
 
 ---
 
@@ -975,9 +1088,11 @@ Automated CI validation improves repository quality but does not transform the p
 
 # GitHub Actions Security Baseline
 
-SEN-026 introduces GitHub Actions as part of the SentinelOps security and quality model.
+SEN-026 introduced GitHub Actions as part of the SentinelOps security and quality model.
 
-The initial workflow is intentionally limited to repository validation.
+SEN-027 extends the same workflow with container and application validation.
+
+The workflow remains validation-only.
 
 It must not perform production deployment.
 
@@ -994,6 +1109,7 @@ Current jobs:
 ```text
 Shell validation
 Secret safety
+Container and application validation
 ```
 
 ## GitHub Actions Trigger Policy
@@ -1009,6 +1125,10 @@ Pull-request execution provides pre-merge validation.
 
 Default-branch execution provides validation after accepted changes reach `main`.
 
+The push-to-main trigger was verified successfully after SEN-026 was merged.
+
+SEN-027 preserves the same trigger policy.
+
 ## GitHub Actions Permission Policy
 
 The workflow explicitly declares:
@@ -1018,7 +1138,7 @@ permissions:
   contents: read
 ```
 
-This is the minimum current repository permission required for the validation jobs.
+This remains the minimum repository permission required for the current validation jobs.
 
 Additional permissions must not be added without a documented requirement.
 
@@ -1033,6 +1153,8 @@ repository write tokens
 VM login credentials
 application secrets
 ```
+
+SEN-027 does not introduce any new workflow secret requirement.
 
 Any future CI secret must have:
 
@@ -1092,7 +1214,7 @@ The finding was handled with a specific local suppression only after confirming 
 
 No global ShellCheck suppression was introduced.
 
-## Controlled CI Failure Evidence
+## SEN-026 Controlled CI Failure Evidence
 
 SEN-026 created a temporary synthetic script containing deliberately invalid Bash syntax.
 
@@ -1121,16 +1243,210 @@ This demonstrates that invalid shell automation can prevent the CI workflow from
 
 The synthetic file was subsequently removed.
 
-The final recovery run returned:
+The recovery run returned:
 
 ```text
 Shell validation: PASS
 Secret safety: PASS
 ```
 
+## Container Validation Security Value
+
+SEN-027 adds automated validation for the container configuration used by the SentinelOps application.
+
+The container/application job runs:
+
+```bash
+docker compose config
+```
+
+to validate Compose parsing.
+
+It also validates the expected loopback-only mapping:
+
+```text
+127.0.0.1:8000:80
+```
+
+and rejects:
+
+```text
+privileged: true
+```
+
+This helps preserve:
+
+```text
+private application backend exposure
+non-privileged application container execution
+```
+
+before changes are merged.
+
+## Docker Build Validation
+
+SEN-027 runs:
+
+```bash
+docker compose build
+```
+
+inside the GitHub-hosted runner.
+
+The repository Dockerfile and application assets must therefore build successfully before the container/application job can pass.
+
+This verifies buildability but is not equivalent to vulnerability scanning.
+
+## Application Startup Validation
+
+After a successful image build, SEN-027 runs:
+
+```bash
+docker compose up -d
+```
+
+The application must start successfully before health testing proceeds.
+
+This validates application startup behaviour in a clean CI runner rather than relying only on configuration parsing.
+
+## Application Health Validation
+
+The CI job requests:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+The job waits for the endpoint rather than assuming immediate readiness.
+
+Expected HTTP status:
+
+```text
+200
+```
+
+Expected JSON:
+
+```json
+{
+  "status": "healthy",
+  "version": "0.1.0"
+}
+```
+
+Both values must match.
+
+This verifies:
+
+```text
+container startup
+network publication
+health endpoint availability
+HTTP success
+health state
+application version
+```
+
+inside the CI environment.
+
+## SEN-027 Controlled Application Failure
+
+SEN-027 introduced a safe controlled application-test mismatch.
+
+The real application continued to return:
+
+```text
+version: 0.1.0
+```
+
+while the CI expectation was temporarily changed to:
+
+```text
+version: 9.9.9
+```
+
+The result was:
+
+```text
+Shell validation: PASS
+Secret safety: PASS
+Container and application validation: FAIL
+```
+
+The failing step was:
+
+```text
+Validate application health response
+```
+
+GitHub Actions reported:
+
+```text
+ERROR: Unexpected health response: {'status': 'healthy', 'version': '0.1.0'}
+```
+
+and:
+
+```text
+Process completed with exit code 1.
+```
+
+This proves the health-response assertion is active and enforced.
+
+## SEN-027 Controlled Failure Independence
+
+During the controlled application failure:
+
+```text
+Shell validation: PASS
+Secret safety: PASS
+```
+
+This demonstrates that the CI jobs remain independently meaningful.
+
+An application validation failure does not falsely convert unrelated checks into failures.
+
+## CI Cleanup Security Value
+
+The container/application job uses:
+
+```text
+if: always()
+```
+
+for its cleanup step.
+
+Cleanup command:
+
+```bash
+docker compose down --volumes --remove-orphans
+```
+
+This step executed during both successful and failed validation.
+
+The CI workflow therefore does not intentionally leave the temporary Compose application running after validation.
+
+## SEN-027 Controlled Recovery
+
+The expected version was restored to:
+
+```text
+0.1.0
+```
+
+The next workflow run returned:
+
+```text
+Shell validation: PASS
+Secret safety: PASS
+Container and application validation: PASS
+```
+
+This provides positive recovery evidence after the controlled application failure.
+
 ## CI Secret-Safety Boundary
 
-The initial automated secret-pattern check is deliberately lightweight.
+The automated secret-pattern check remains deliberately lightweight.
 
 It detects obvious prohibited patterns but is not equivalent to:
 
@@ -1145,6 +1461,32 @@ external secret-management enforcement
 Manual review and secure credential handling remain mandatory.
 
 Future stronger secret-scanning tooling may be introduced if justified.
+
+## Container CI Security Boundary
+
+The SEN-027 container job is not equivalent to:
+
+```text
+container vulnerability scanning
+malware analysis
+SBOM validation
+image signing
+runtime intrusion detection
+Docker daemon hardening
+registry security validation
+```
+
+It currently validates:
+
+```text
+Compose parsing
+specific security configuration assumptions
+image buildability
+application startup
+basic application health behaviour
+```
+
+These claims must remain precise.
 
 ---
 
@@ -1176,37 +1518,206 @@ Before MVP completion, the following controls should be demonstrated:
 22. ShellCheck passes after reviewed findings are resolved;
 23. automated Secret safety validation passes;
 24. a controlled invalid shell script causes CI failure;
-25. controlled CI failure recovery returns the workflow to a passing state;
-26. final required CI checks pass before MVP release.
+25. controlled shell CI failure recovery returns the workflow to a passing state;
+26. Docker Compose configuration parses successfully;
+27. loopback-only application publication is validated;
+28. privileged application container mode is rejected;
+29. the SentinelOps application image builds successfully;
+30. the application starts successfully in CI;
+31. the application health endpoint becomes available;
+32. the application health endpoint returns HTTP 200;
+33. health status equals `healthy`;
+34. health version equals `0.1.0`;
+35. a controlled application expectation mismatch causes CI failure;
+36. controlled application CI failure recovery returns all jobs to a passing state;
+37. final required CI checks pass before MVP release.
 
 ---
 
 # CI Security Verification Set
 
-Before SEN-026 is considered complete, verify:
+Before the current CI implementation is considered complete, verify:
 
 ```text
 .github/workflows/ci.yml exists
 workflow runs on pull_request
-workflow is configured for push to main
+workflow runs on push to main
 workflow permissions are read-only
+
 Bash syntax validation executes
 ShellCheck executes
 all current provisioning shell scripts are covered
 real ShellCheck findings are reviewed
+
 secret-pattern validation executes
 workflow requires no production secrets
+
+Docker tooling is available in the selected runner
+Docker Compose configuration parses
+loopback-only application mapping is present
+privileged: true is rejected
+Docker image builds successfully
+application starts successfully
+health endpoint becomes available
+health request returns HTTP 200
+health status equals healthy
+health version equals 0.1.0
+
 controlled shell failure is detected
-controlled failure returns non-zero status
-failing file is identified
-synthetic failure is removed
+controlled shell failure returns non-zero status
+controlled shell failure is recovered
+
+controlled application mismatch is detected
+controlled application failure returns non-zero status
+controlled application failing step is identified
+cleanup executes after application failure
+controlled application mismatch is recovered
+
 final Shell validation passes
 final Secret safety passes
+final Container and application validation passes
 ```
 
-SEN-026 provides evidence for all of the above on the feature branch.
+SEN-026 provides the repository-level shell and secret-validation evidence.
 
-A successful post-merge `main` workflow execution provides final default-branch evidence for the configured push trigger.
+SEN-027 provides the container and application-validation evidence.
+
+---
+
+# SEN-026 CI Evidence
+
+SEN-026 established:
+
+```text
+GitHub Actions workflow: IMPLEMENTED
+pull-request trigger: VERIFIED
+push-to-main trigger: VERIFIED
+workflow contents permission: READ-ONLY
+Bash syntax validation: VERIFIED
+ShellCheck integration: VERIFIED
+real ShellCheck finding: DETECTED
+ShellCheck finding review: COMPLETE
+specific ShellCheck correction: VERIFIED
+Secret safety job: VERIFIED
+controlled CI shell failure: VERIFIED
+controlled failure exit behaviour: VERIFIED
+controlled failure recovery: VERIFIED
+final Shell validation: PASS
+final Secret safety: PASS
+production credentials required by CI: NONE
+```
+
+---
+
+# SEN-027 CI Evidence
+
+SEN-027 establishes:
+
+```text
+Container and application validation job: IMPLEMENTED
+Docker version verification: PASS
+Docker Compose version verification: PASS
+Docker Compose configuration parsing: PASS
+loopback-only mapping validation: PASS
+privileged-mode rejection: PASS
+Docker image build: PASS
+application startup: PASS
+health endpoint availability: PASS
+HTTP 200 validation: PASS
+health status validation: PASS
+health version validation: PASS
+Compose cleanup: PASS
+```
+
+Initial SEN-027 pull-request run:
+
+```text
+SentinelOps CI #7
+
+Shell validation: PASS
+Secret safety: PASS
+Container and application validation: PASS
+```
+
+Controlled application-failure run:
+
+```text
+SentinelOps CI #8
+
+Shell validation: PASS
+Secret safety: PASS
+Container and application validation: FAIL
+```
+
+Failing step:
+
+```text
+Validate application health response
+```
+
+Observed error:
+
+```text
+Unexpected health response
+```
+
+Observed workflow result:
+
+```text
+exit code 1
+```
+
+Recovery run:
+
+```text
+SentinelOps CI #9
+
+Shell validation: PASS
+Secret safety: PASS
+Container and application validation: PASS
+```
+
+Recovery workflow status:
+
+```text
+Success
+```
+
+---
+
+# Current CI Requirement Status
+
+Current CI requirements:
+
+```text
+FR-46: Continuous Integration
+FR-47: Shell Validation
+FR-48: Container Validation
+FR-49: Application Testing
+FR-50: Secret Protection
+```
+
+Current status:
+
+```text
+FR-46: SATISFIED
+FR-47: SATISFIED
+FR-48: SATISFIED
+FR-49: SATISFIED
+FR-50: SATISFIED
+```
+
+Related success criteria:
+
+```text
+SC-36: SATISFIED
+SC-37: SATISFIED
+SC-38: SATISFIED
+SC-39: SATISFIED
+SC-40: SATISFIED
+```
+
+SEN-027 therefore completes the current FR-48 and FR-49 CI scope that remained after SEN-026.
 
 ---
 
@@ -1224,7 +1735,8 @@ The security baseline should be reviewed:
 - before provisioning automation;
 - before GitHub Actions implementation;
 - after GitHub Actions security validation;
-- before container and application CI expansion;
+- after container and application CI expansion;
+- before additional CI security tooling;
 - before any cloud deployment;
 - before MVP release.
 
@@ -1232,44 +1744,91 @@ Any implementation decision that changes the security posture should trigger a r
 
 ---
 
-# Current CI Security Status
+# Current Security and CI State
 
-SEN-026 current feature-branch evidence:
-
-```text
-GitHub Actions workflow: IMPLEMENTED
-pull-request trigger: VERIFIED
-push-to-main trigger: CONFIGURED
-workflow contents permission: READ-ONLY
-Bash syntax validation: VERIFIED
-ShellCheck integration: VERIFIED
-real ShellCheck finding: DETECTED
-ShellCheck finding review: COMPLETE
-specific ShellCheck correction: VERIFIED
-Secret safety job: VERIFIED
-controlled CI shell failure: VERIFIED
-controlled failure exit behavior: VERIFIED
-controlled failure recovery: VERIFIED
-final Shell validation: PASS
-final Secret safety: PASS
-production credentials required by CI: NONE
-```
-
-Remaining CI security-related implementation scope:
+Current SentinelOps repository-validation state:
 
 ```text
-container validation
-application behaviour validation
+Shell validation: IMPLEMENTED
+Secret safety: IMPLEMENTED
+Container and application validation: IMPLEMENTED
 ```
 
-These map to:
+Current automated security-relevant checks include:
 
 ```text
-FR-48
-FR-49
+Bash syntax
+ShellCheck
+secret-pattern safety
+Compose parsing
+loopback-only application mapping
+privileged-mode rejection
+image buildability
+application startup
+health endpoint availability
+HTTP 200
+health status
+health version
+Compose cleanup
 ```
 
-and should extend the established SEN-026 workflow.
+Current workflow permission state:
+
+```text
+contents: read
+```
+
+Current workflow production credentials:
+
+```text
+none
+```
+
+Current container/application CI environment:
+
+```text
+GitHub-hosted Ubuntu runner
+```
+
+Current application CI endpoint:
+
+```text
+http://127.0.0.1:8000/health
+```
+
+Current expected health response:
+
+```json
+{"status":"healthy","version":"0.1.0"}
+```
+
+---
+
+# Known Security Limitations
+
+The current SentinelOps CI baseline does not provide:
+
+```text
+formal penetration testing
+container vulnerability scanning
+dependency vulnerability enforcement
+SBOM generation
+image signing
+container registry trust enforcement
+runtime intrusion detection
+secret entropy scanning
+historical Git secret forensics
+cloud security posture management
+production deployment controls
+high-availability validation
+formal compliance validation
+```
+
+These limitations should remain explicit.
+
+Passing CI means the documented SentinelOps validation checks passed.
+
+It does not mean the system is free of all security vulnerabilities.
 
 ---
 
@@ -1297,7 +1856,9 @@ runtime verification
 failure testing
 recovery testing
 version-control evidence
-automated CI validation
+automated repository validation
+automated container validation
+automated application validation
 ```
 
 to establish its security baseline.
