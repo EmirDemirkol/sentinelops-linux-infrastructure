@@ -10,6 +10,8 @@ This change addresses the resource-logging gap identified against SC-14.
 
 GitHub issue: #42, SEN-028: Complete structured resource monitoring logs.
 
+Pull request: #43.
+
 ## Scope
 
 SEN-028 adds:
@@ -161,14 +163,16 @@ Sourcing the script defines its functions without executing the host checks. Thi
 
 The script must be sourced using Bash for these tests.
 
-The main workflow calls:
+The main workflow explicitly supplies the runtime input paths:
 
 ```bash
-check_system_load || true
-check_memory_usage || true
+check_system_load /proc/loadavg || true
+check_memory_usage /proc/meminfo || true
 ```
 
 This allows the remaining host checks to run after a resource collection failure has been reported.
+
+The collectors retain their default input paths for isolated calls that omit an argument.
 
 The overall script exit status is not an aggregate health result. Inspect the structured records for individual check outcomes.
 
@@ -181,6 +185,12 @@ The following checks completed without errors:
 ```bash
 bash -n provision/monitoring/health-check.sh
 git diff --check
+```
+
+Staged changes also passed:
+
+```bash
+git diff --cached --check
 ```
 
 Synthetic resource inputs and test logs were placed in temporary directories.
@@ -274,6 +284,108 @@ PASS: Valid zero-value recovery succeeded.
 
 This confirms successful collection with valid input after the controlled failure cases.
 
+## Initial Implementation Commit
+
+The implementation and initial evidence were committed as:
+
+```text
+1b5394f feat: complete SEN-028 structured resource monitoring logs
+```
+
+## Initial Pull-Request CI Failure
+
+The initial pull-request workflow was:
+
+```text
+SentinelOps CI #13
+Pull request #43
+```
+
+Results:
+
+```text
+Shell validation: FAIL
+Secret safety: PASS
+Container and application validation: PASS
+```
+
+Bash syntax validation passed.
+
+The failing step was:
+
+```text
+Run ShellCheck
+```
+
+ShellCheck reported:
+
+```text
+SC2120: Function references arguments, but none are ever passed.
+SC2119: Use function "$@" if the function's $1 should mean the script's $1.
+```
+
+Both resource collectors accepted an optional input-file argument, but the calls inside `main()` supplied no arguments.
+
+The isolated fixture calls were executed outside the script and therefore did not establish argument usage for this static analysis.
+
+The ShellCheck step exited with code `1`.
+
+This was a real CI finding, separate from the deliberately controlled resource-input failure tests.
+
+## ShellCheck Correction
+
+The runtime calls were changed to explicitly provide the intended Linux input paths:
+
+```bash
+check_system_load /proc/loadavg || true
+check_memory_usage /proc/meminfo || true
+```
+
+The explicit paths match the collectors' existing defaults.
+
+This resolves the argument-usage findings while preserving the ability to supply synthetic fixture paths during isolated tests.
+
+No ShellCheck warning suppression or workflow relaxation was introduced.
+
+The correction was committed as:
+
+```text
+30423cd fix: pass explicit resource paths for SEN-028 ShellCheck
+```
+
+## Pull-Request CI Recovery
+
+After the correction was pushed, GitHub Actions executed:
+
+```text
+SentinelOps CI #14
+Pull request #43
+```
+
+Results:
+
+```text
+Shell validation: PASS
+Secret safety: PASS
+Container and application validation: PASS
+Workflow status: SUCCESS
+```
+
+The recovery confirms that the corrected script passed the existing Bash syntax and ShellCheck validation.
+
+The existing secret-safety and container/application jobs also passed.
+
+## CI Run Sequence
+
+| Run | Shell validation | Secret safety | Container and application validation | Explanation |
+| --- | --- | --- | --- | --- |
+| #13 | FAIL | PASS | PASS | ShellCheck identified implicit collector argument usage |
+| #14 | PASS | PASS | PASS | Explicit runtime input paths resolved the findings |
+
+The CI workflow continues to contain the same three jobs.
+
+The synthetic collector tests were executed manually in Bash. They were not added to CI by this change.
+
 ## Deployment Validation
 
 The updated script was copied from the Mac to the primary Ubuntu VM and syntax-checked before installation.
@@ -286,7 +398,7 @@ The updated script was installed at:
 /home/emir/sentinelops-monitoring/health-check.sh
 ```
 
-Deployed script ownership and permissions were verified as:
+During initial deployment, script ownership and permissions were verified as:
 
 ```text
 emir:emir 755 /home/emir/sentinelops-monitoring/health-check.sh
@@ -298,6 +410,20 @@ The deployed script passed:
 bash -n /home/emir/sentinelops-monitoring/health-check.sh
 ```
 
+After CI recovery, the corrected script was copied to the VM again.
+
+The staged copy was syntax-checked and installed using:
+
+```bash
+bash -n /tmp/health-check-sen028.sh &&
+sudo install -o emir -g emir -m 0755 \
+  /tmp/health-check-sen028.sh \
+  /home/emir/sentinelops-monitoring/health-check.sh &&
+bash /home/emir/sentinelops-monitoring/health-check.sh
+```
+
+The installation and subsequent full monitoring run completed successfully.
+
 ## Ubuntu Runtime Validation
 
 Validation host:
@@ -308,31 +434,49 @@ Ubuntu Server 24.04.4 LTS
 aarch64
 ```
 
-The deployed script was executed using:
+The initial full runtime validation completed at:
 
-```bash
-bash /home/emir/sentinelops-monitoring/health-check.sh
+```text
+2026-09-06T18:07:46Z
 ```
 
-The full monitoring run completed on 2026-09-06.
-
-Resource records written to the runtime log were:
+Initial resource records were:
 
 ```text
 timestamp=2026-09-06T18:07:46Z check=system_load status=PASS severity=INFO message="System load sample collected: load_1m=0.05 load_5m=0.03 load_15m=0.01; load averages, not CPU percentages; no load threshold evaluated"
 timestamp=2026-09-06T18:07:46Z check=memory_usage status=PASS severity=INFO message="Memory sample collected: total_kib=3027704 available_kib=2720740; collection only, no usage threshold evaluated"
 ```
 
-These values are evidence from that execution, not fixed expected values for subsequent runs.
+After installing the ShellCheck-corrected script, the final full runtime validation completed at:
+
+```text
+2026-09-06T23:19:39Z
+```
+
+Final resource records were:
+
+```text
+timestamp=2026-09-06T23:19:39Z check=system_load status=PASS severity=INFO message="System load sample collected: load_1m=0.04 load_5m=0.07 load_15m=0.03; load averages, not CPU percentages; no load threshold evaluated"
+timestamp=2026-09-06T23:19:39Z check=memory_usage status=PASS severity=INFO message="Memory sample collected: total_kib=3027704 available_kib=2718420; collection only, no usage threshold evaluated"
+```
+
+The records were inspected using:
+
+```bash
+grep -E 'check=(memory_usage|system_load)' \
+  /var/log/sentinelops/health-check.log | tail -n 2
+```
+
+These values are evidence from the recorded executions, not fixed expected values for subsequent runs.
 
 ## Operational Regression Results
 
-The same full runtime execution reported:
+The final full runtime execution reported:
 
 | Check | Observed result |
 | --- | --- |
 | Root filesystem usage | 48%, below warning threshold |
-| Backup freshness | Newest backup age 0 hours |
+| Backup freshness | Newest backup age 5 hours, within the 36-hour threshold |
 | Failed systemd units | 0 |
 | Docker service | Active |
 | Nginx service | Active |
@@ -345,31 +489,61 @@ The same full runtime execution reported:
 | UFW incoming policy | Deny |
 | Allowed inbound services | TCP 22 and TCP 80 |
 
+The newest backup reported by that execution was:
+
+```text
+sentinelops-backup-20260906T173305Z.tar.gz
+```
+
 This provides operational regression evidence alongside the new resource records.
 
 ## Log Permissions
 
-After runtime validation, ownership and permissions remained:
+After the initial runtime validation, ownership and permissions were verified as:
 
 ```text
 root:emir 750 /var/log/sentinelops
 emir:emir 640 /var/log/sentinelops/health-check.log
 ```
 
-The resource records were written successfully using the existing log permissions.
+The subsequent correction changed the collector call arguments and reinstalled the script. It did not change log permissions.
+
+The final runtime execution also wrote both resource records successfully.
+
+## Validated Results
+
+- [x] Valid memory samples produce structured records.
+- [x] Valid load samples produce structured records.
+- [x] Memory units and load averaging periods are explicit.
+- [x] Missing memory input is rejected.
+- [x] Available memory exceeding total memory is rejected.
+- [x] Missing load input is rejected.
+- [x] Malformed load input is rejected.
+- [x] Tested collection failures return exit code `1`.
+- [x] Tested collection failures produce FAIL/CRITICAL records.
+- [x] Valid zero-value samples are accepted after the failure cases.
+- [x] Local Bash syntax validation passes.
+- [x] Working-tree and staged whitespace validation pass.
+- [x] Initial ShellCheck findings are captured.
+- [x] Explicit runtime paths resolve the ShellCheck findings.
+- [x] Recovery CI run #14 passes all three jobs.
+- [x] Corrected script is installed on the primary Ubuntu VM.
+- [x] Final runtime memory and load records are present.
+- [x] Final full monitoring execution reports the observed operational checks healthy.
+- [x] Existing log ownership and permissions are preserved.
 
 ## Result and Boundaries
 
-SEN-028 validation demonstrates:
+SEN-028 provides implementation and validation evidence for the resource-logging gap identified against SC-14.
 
-- Valid memory and load samples reach the structured log.
-- The tested missing and invalid inputs produce explicit collection failures.
-- Valid zero values are accepted.
-- Successful collection resumes with valid input.
-- The deployed script collects real Ubuntu resource samples.
-- The full monitoring workflow completes with the observed operational checks healthy.
-- Existing log ownership and permissions are preserved.
+Memory and load collection results now reach the structured runtime log.
 
-The synthetic checks were executed manually in Bash. This document does not claim that they are automated by the current CI workflow.
+Successful collection does not evaluate memory or load thresholds.
 
-Pull-request CI, merge verification and default-branch CI are separate completion steps.
+The synthetic tests cover the recorded valid, missing, invalid and zero-value inputs. They do not establish exhaustive coverage of every parser validation branch.
+
+The full script retains its existing overall exit-status behaviour. Individual structured records remain necessary when assessing monitoring outcomes.
+
+CI run #14 proves recovery for the implementation correction. Any subsequent documentation commit requires its own pull-request CI result before merge.
+
+Merge verification and default-branch CI remain separate completion steps.
