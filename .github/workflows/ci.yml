@@ -198,7 +198,7 @@ jobs:
 
           expected = {
               "status": "healthy",
-              "version": "0.1.0",
+              "version": "9.9.9",
           }
 
           if data != expected:
