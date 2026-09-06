@@ -610,9 +610,11 @@ group: emir
 mode: 0750
 ```
 
-The monitoring workflow evaluates operational state including:
+The monitoring workflow records:
 
 ```text
+system load sample
+memory sample
 disk usage
 backup freshness
 Docker service
@@ -622,6 +624,17 @@ Compose application
 application health
 host Nginx health
 ```
+
+SEN-028 adds structured resource collection records:
+
+- `memory_usage` records total and available memory from `/proc/meminfo` as `total_kib` and `available_kib`, in kibibytes.
+- `system_load` records the 1-minute, 5-minute and 15-minute load averages from `/proc/loadavg` as `load_1m`, `load_5m` and `load_15m`.
+
+For these two checks, `PASS` with severity `INFO` means the sample was collected and validated successfully. It does not indicate that memory usage or system load is below a threshold. Load averages are not CPU percentages.
+
+Missing, unreadable or invalid resource input produces a structured `FAIL` record with severity `CRITICAL`. The collector returns exit code `1`, while the main monitoring workflow continues with the remaining checks.
+
+The collectors accept an optional input-file path for isolated tests. Source the script using Bash when testing these functions; sourcing it does not execute the host monitoring workflow.
 
 ### Backup
 
