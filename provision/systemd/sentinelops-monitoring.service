@@ -1,0 +1,14 @@
+[Unit]
+Description=SentinelOps scheduled host and application monitoring
+After=network.target docker.service nginx.service
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+WorkingDirectory=/usr/local/lib/sentinelops
+ExecStart=/usr/bin/bash /usr/local/lib/sentinelops/health-check.sh
+TimeoutStartSec=45s
+UMask=0027
+StandardOutput=journal
+StandardError=journal
