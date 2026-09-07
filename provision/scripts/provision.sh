@@ -18,6 +18,7 @@ SSH_SOURCE="${PROVISION_DIR}/ssh"
 
 APP_DIR="${TARGET_HOME}/sentinelops-app"
 MONITORING_DIR="${TARGET_HOME}/sentinelops-monitoring"
+SCHEDULED_MONITORING_DIR="/usr/local/lib/sentinelops"
 BACKUP_ROOT="${TARGET_HOME}/backups"
 BACKUP_DIR="${BACKUP_ROOT}/sentinelops"
 LOG_DIR="/var/log/sentinelops"
@@ -135,6 +136,8 @@ validate_source_assets() {
         "${NGINX_SOURCE}/sentinelops"
         "${SYSTEMD_SOURCE}/sentinelops-backup.service"
         "${SYSTEMD_SOURCE}/sentinelops-backup.timer"
+        "${SYSTEMD_SOURCE}/sentinelops-monitoring.service"
+        "${SYSTEMD_SOURCE}/sentinelops-monitoring.timer"
         "${SSH_SOURCE}/00-sentinelops.conf"
     )
 
@@ -315,6 +318,57 @@ validate_port_conflicts() {
     fi
 }
 
+validate_scheduled_monitoring_paths() {
+    log "Preflight: validating protected monitoring paths"
+
+    local directory
+    local owner
+    local mode
+
+    for directory in /usr /usr/local /usr/local/lib "$SCHEDULED_MONITORING_DIR"; do
+        if [[ -L "$directory" ]]; then
+            fail "Scheduled monitoring directory must not be a symlink: ${directory}"
+        fi
+
+        if [[ -e "$directory" ]]; then
+            if [[ ! -d "$directory" ]]; then
+                fail "Expected a directory at '${directory}'."
+            fi
+
+            owner="$(stat -c '%u' "$directory")"
+            mode="$(stat -c '%a' "$directory")"
+
+            if [[ "$owner" != "0" ]] || (( (8#$mode & 0022) != 0 )); then
+                fail "Scheduled monitoring directory must be root-owned and not group/world writable: ${directory}"
+            fi
+        fi
+    done
+
+    local script="${SCHEDULED_MONITORING_DIR}/health-check.sh"
+
+    if [[ -L "$script" ]]; then
+        fail "Scheduled monitoring script must not be a symlink: ${script}"
+    fi
+
+    if [[ -e "$script" && ! -f "$script" ]]; then
+        fail "Expected a regular file at '${script}'."
+    fi
+}
+
+pause_scheduled_monitoring() {
+    log "Pausing existing scheduled monitoring during provisioning"
+
+    if [[ -f /etc/systemd/system/sentinelops-monitoring.timer ]]; then
+        systemctl stop sentinelops-monitoring.timer
+    fi
+
+    if [[ -f /etc/systemd/system/sentinelops-monitoring.service ]]; then
+        systemctl stop sentinelops-monitoring.service
+    fi
+
+    info "Scheduled monitoring will be enabled after provisioning validation succeeds."
+}
+
 run_preflight() {
     log "Starting SentinelOps provisioning preflight"
 
@@ -327,6 +381,7 @@ run_preflight() {
     validate_disk_space
     validate_repository_resolution
     validate_managed_paths
+    validate_scheduled_monitoring_paths
     validate_port_conflicts
 
     log "Provisioning preflight completed successfully"
@@ -450,6 +505,23 @@ deploy_monitoring() {
     install -o "$TARGET_USER" -g "$TARGET_GROUP" -m 0775 \
         "${MONITORING_SOURCE}/health-check.sh" \
         "${MONITORING_DIR}/health-check.sh"
+
+    install -d -o root -g root -m 0755 \
+        "$SCHEDULED_MONITORING_DIR"
+
+    install -o root -g root -m 0755 \
+        "${MONITORING_SOURCE}/health-check.sh" \
+        "${SCHEDULED_MONITORING_DIR}/health-check.sh"
+
+    bash -n "${SCHEDULED_MONITORING_DIR}/health-check.sh"
+
+    if [[ "$(stat -c '%U:%G:%a' "$SCHEDULED_MONITORING_DIR")" != "root:root:755" ]]; then
+        fail "Scheduled monitoring directory permissions are incorrect."
+    fi
+
+    if [[ "$(stat -c '%U:%G:%a' "${SCHEDULED_MONITORING_DIR}/health-check.sh")" != "root:root:755" ]]; then
+        fail "Scheduled monitoring script permissions are incorrect."
+    fi
 }
 
 deploy_backup() {
@@ -482,7 +554,7 @@ deploy_nginx() {
 }
 
 deploy_systemd_units() {
-    log "Deploying backup systemd units"
+    log "Deploying backup and monitoring systemd units"
 
     install -o root -g root -m 0644 \
         "${SYSTEMD_SOURCE}/sentinelops-backup.service" \
@@ -491,6 +563,20 @@ deploy_systemd_units() {
     install -o root -g root -m 0644 \
         "${SYSTEMD_SOURCE}/sentinelops-backup.timer" \
         /etc/systemd/system/sentinelops-backup.timer
+
+    install -o root -g root -m 0644 \
+        "${SYSTEMD_SOURCE}/sentinelops-monitoring.service" \
+        /etc/systemd/system/sentinelops-monitoring.service
+
+    install -o root -g root -m 0644 \
+        "${SYSTEMD_SOURCE}/sentinelops-monitoring.timer" \
+        /etc/systemd/system/sentinelops-monitoring.timer
+
+    if ! systemd-analyze verify \
+        /etc/systemd/system/sentinelops-monitoring.service \
+        /etc/systemd/system/sentinelops-monitoring.timer; then
+        fail "Monitoring systemd unit validation failed."
+    fi
 
     systemctl daemon-reload
     systemctl enable --now sentinelops-backup.timer
@@ -715,12 +801,33 @@ validate_backup() {
 run_monitoring_check() {
     log "Running SentinelOps monitoring check"
 
-    if ! bash "${MONITORING_DIR}/health-check.sh"; then
-        fail "SentinelOps monitoring check returned a failure."
+    if ! systemctl start sentinelops-monitoring.service; then
+        journalctl -u sentinelops-monitoring.service -n 50 --no-pager || true
+        fail "Monitoring service execution failed. Inspect its journal."
     fi
+
+    info "Monitoring service execution completed. Individual health outcomes are recorded in ${LOG_FILE}."
 
     chown "$TARGET_USER:$TARGET_GROUP" "$LOG_FILE"
     chmod 0640 "$LOG_FILE"
+}
+
+enable_scheduled_monitoring() {
+    log "Enabling scheduled monitoring"
+
+    systemctl enable --now sentinelops-monitoring.timer
+    systemctl is-enabled sentinelops-monitoring.timer
+    systemctl is-active sentinelops-monitoring.timer
+
+    systemctl list-timers --all --no-pager sentinelops-monitoring.timer
+
+    if [[ "$(stat -c '%U:%G:%a' "$LOG_DIR")" != "root:${TARGET_GROUP}:750" ]]; then
+        fail "Monitoring log directory permissions are incorrect."
+    fi
+
+    if [[ "$(stat -c '%U:%G:%a' "$LOG_FILE")" != "${TARGET_USER}:${TARGET_GROUP}:640" ]]; then
+        fail "Monitoring log file permissions are incorrect."
+    fi
 }
 
 validate_failed_units() {
@@ -738,6 +845,8 @@ validate_failed_units() {
 
 main() {
     run_preflight
+
+    pause_scheduled_monitoring
 
     install_base_packages
     configure_docker_repository
@@ -763,6 +872,7 @@ main() {
     validate_backup
     run_monitoring_check
     validate_failed_units
+    enable_scheduled_monitoring
 
     log "SentinelOps provisioning completed successfully"
 }

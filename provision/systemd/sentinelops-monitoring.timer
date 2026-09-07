@@ -1,0 +1,12 @@
+[Unit]
+Description=Run SentinelOps monitoring every minute
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=1min
+AccuracySec=1s
+RandomizedDelaySec=0
+Unit=sentinelops-monitoring.service
+
+[Install]
+WantedBy=timers.target
