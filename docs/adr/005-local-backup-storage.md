@@ -64,7 +64,7 @@ provision/systemd/sentinelops-backup.service
 provision/systemd/sentinelops-backup.timer
 ```
 
-The provisioner deploys the backup workflow, enables the timer and validates backup creation, integrity and restoration behaviour.
+The provisioner deploys the backup workflow, enables the timer, ensures an initial backup exists and validates its checksum and manifest. Restoration was tested separately using synthetic data and is documented in docs/phase-2/backup-recovery-baseline.md.
 
 ## Validation
 
