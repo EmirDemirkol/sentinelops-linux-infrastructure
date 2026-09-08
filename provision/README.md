@@ -22,7 +22,7 @@ The provisioner supports:
 
 Repeated execution should converge the host toward the intended state without duplicate firewall rules, duplicate group membership or unnecessary provisioning-specific backup archives.
 
-SEN-029 runtime validation has been completed on the disposable test VM. Its pull-request CI, merge and default-branch CI remain separate completion steps.
+SEN-029 runtime validation has been completed on the disposable test VM. Pull-request CI, merge verification and default-branch CI have also passed.
 
 ## Supported Environment
 
@@ -1339,7 +1339,7 @@ b353f1e
 
 Runtime validation is recorded above.
 
-Pull-request CI, merge verification and default-branch CI have not yet been established for SEN-029 at this documentation stage.
+Pull-request CI, merge verification and default-branch CI passed for SEN-029.
 
 ## Secret Handling
 
@@ -1443,4 +1443,4 @@ SEN-028 completed structured resource logging and passed pull-request and defaul
 
 SEN-029 has demonstrated scheduled execution, reboot persistence, repeated provisioning and SC-15 detection timing on the test VM.
 
-SEN-029 repository completion remains pending until its pull-request CI, merge and default-branch CI are verified.
+SEN-029 repository completion is complete. Runtime validation, pull-request CI, merge verification and default-branch CI have passed.

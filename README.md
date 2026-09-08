@@ -2,152 +2,206 @@
 
 **Linux Infrastructure Automation and Monitoring Lab**
 
-SentinelOps is a practical infrastructure engineering project designed to demonstrate Linux administration, networking, security, automation, containerisation, monitoring, backup and recovery, incident response, and DevOps fundamentals.
+SentinelOps is a practical single-server infrastructure project that demonstrates Linux administration, secure access, networking, container deployment, monitoring, backup, recovery, failure simulation, repeatable provisioning and CI validation.
 
-The project simulates a small fictional company environment that requires a Linux server to securely host and operate an application.
-
-## Project Goal
-
-The goal of SentinelOps is to build a Linux environment that can eventually be:
-
-- securely configured;
-- accessed using controlled user permissions;
-- protected with firewall rules;
-- used to host a containerised application;
-- served through an Nginx reverse proxy;
-- monitored for service and resource failures;
-- backed up automatically;
-- restored after data loss;
-- tested using deliberate failure scenarios;
-- rebuilt through repeatable automation.
-
-The project focuses on understanding and operating infrastructure rather than simply installing tools.
+The project uses a fictional application environment so that the infrastructure lifecycle can be built, inspected, deliberately failed, recovered and explained without using production data.
 
 ## Current Status
 
-**Phase 0: Discovery and Planning**
+The SentinelOps MVP implementation is substantially complete through SEN-029.
 
-Infrastructure implementation has not started yet.
+Completed areas include:
 
-Phase 0 defines:
+- Ubuntu Server administration and secure SSH access;
+- UFW firewall protection with a deny-by-default inbound policy;
+- host-side Nginx reverse proxy;
+- Docker and Docker Compose application deployment;
+- private application binding on `127.0.0.1:8000`;
+- application homepage and `/health` endpoint;
+- structured monitoring records;
+- scheduled monitoring through systemd;
+- monitoring failure detection and recovery validation;
+- automated local backups;
+- backup manifests, checksums, retention and restoration;
+- controlled failure simulations;
+- repeatable and idempotent provisioning;
+- GitHub Actions shell, secret, container and application validation.
 
-- problem statement;
-- objectives;
-- project scope;
-- exclusions;
-- stakeholders;
-- functional requirements;
-- non-functional requirements;
-- architecture;
-- networking;
-- threat model;
-- security baseline;
-- risks;
-- MVP;
-- success criteria;
-- development roadmap.
+SEN-030 completes the professional README and ADR documentation. Clean rebuild verification and final demonstration evidence remain separate finalisation work.
 
-## Planned MVP Architecture
+## Project Goal
 
-The first version of SentinelOps will use a single Ubuntu Server virtual machine.
+SentinelOps demonstrates how a small Linux environment can be securely configured, operated, monitored, backed up, recovered and reproduced through understandable automation.
 
-Planned request flow:
+The project prioritises manual understanding before automation. Each major change is documented with its purpose, implementation, validation method, failure mode and recovery path.
+
+## MVP Architecture
+
+The MVP uses one Ubuntu Server virtual machine running on a local MacBook.
 
 ```text
-Host Browser
-     |
-     | HTTP
-     v
+MacBook terminal and browser
+          |
+          | private virtual network
+          v
 Ubuntu Server VM
-     |
-     v
-UFW Firewall
-     |
-     v
-Nginx Reverse Proxy
-     |
-     v
-Docker Application
+          |
+          +--> SSH for administration
+          +--> UFW host firewall
+          +--> Nginx reverse proxy :80
+          |          |
+          |          +--> 127.0.0.1:8000
+          |                    |
+          |                    +--> Docker Compose application
+          +--> systemd monitoring service and timer
+          +--> monitoring log
+          +--> systemd backup service and timer
+          +--> local backup storage
+```
 
-The same server will later provide:
+Nginx is the application-facing entry point. The application backend is published only on the host loopback interface, so normal traffic must pass through Nginx.
 
-- health monitoring
-- operational logging
-- scheduled backups
-- restoration procedures
-- controlled failure simulations
+## Network Exposure
 
-The initial application will remain intentionally small because SentinelOps is an infrastructure project rather than an application-development project.
+| Port | Service | Exposure | Purpose |
+|---|---|---|---|
+| 22/TCP | SSH | Approved administration path | Remote administration |
+| 80/TCP | Host Nginx | Approved application path | HTTP application access |
+| 8000/TCP | Application backend | `127.0.0.1` only | Nginx to application traffic |
+| Other inbound ports | None | Blocked by default | Reduce attack surface |
 
-## Planned Core Technologies
+The MVP does not require public DNS, public HTTPS, a public IP address or multi-server networking.
 
-### Initial MVP
+## Application
 
-- Ubuntu Linux
-- Bash
-- Git
-- GitHub
-- SSH
-- UFW
-- Nginx
-- Docker
-- Docker Compose
-- systemd
-- GitHub Actions
+The application is intentionally small because SentinelOps is an infrastructure project.
 
-### Possible Post-MVP Enhancements
+It provides:
 
-- Ansible
-- Prometheus
-- Node Exporter
-- Grafana
-- AWS EC2
-- IAM
-- Security Groups
-- CloudWatch
+- a basic homepage;
+- a `/health` endpoint;
+- documented version information;
+- synthetic data suitable for backup and recovery testing.
 
-Technologies such as Kubernetes, Terraform, multi-cloud architecture, and complex distributed systems are deliberately excluded from the initial MVP.
+The expected health response is:
+
+```json
+{"status":"healthy","version":"0.1.0"}
+```
+
+## Monitoring
+
+The monitoring workflow checks and records:
+
+- Nginx service state;
+- Docker service state;
+- SSH service state;
+- Compose application state;
+- application health;
+- host Nginx health;
+- filesystem usage;
+- backup freshness;
+- memory samples from `/proc/meminfo`;
+- load samples from `/proc/loadavg`.
+
+The scheduled monitoring service runs the protected root-owned copy of the health-check script. The timer executes it every minute after boot. Results are written to:
+
+```text
+/var/log/sentinelops/health-check.log
+```
+
+The monitoring log uses structured records containing a timestamp, check name, status, severity and message.
+
+Memory and load records are collection records. They do not claim that a threshold has been evaluated unless a threshold is explicitly documented.
+
+## Backups and Recovery
+
+The backup workflow uses systemd to run the repository-managed backup script. It creates timestamped archives, manifests and checksums, applies the documented retention policy and records the result.
+
+Backups are stored locally for the MVP so that creation, integrity verification, restoration and recovery can be understood and validated before introducing remote storage.
+
+The documented restoration flow is:
+
+1. select a backup;
+2. verify its checksum;
+3. extract it to a safe temporary location;
+4. review the manifest and contents;
+5. restore the required data or configuration;
+6. correct ownership and permissions;
+7. restart or reload the required service;
+8. verify the application and health endpoint.
+
+## Provisioning
+
+The main provisioner is:
+
+```text
+provision/scripts/provision.sh
+```
+
+It validates prerequisites, installs or configures required packages, deploys application and monitoring assets, configures Nginx, installs systemd units, applies SSH and firewall configuration, starts the application, ensures an initial backup and validates the resulting services.
+
+The provisioner is designed to be repeatable and to avoid duplicate firewall rules, duplicate group membership and unnecessary provisioning-specific backup archives.
+
+Important failures are rejected during preflight with useful output and a non-zero exit status.
 
 ## Security Principles
 
-SentinelOps will follow several core security principles:
+SentinelOps preserves these boundaries:
 
-- least privilege
-- minimum network exposure
-- SSH key authentication
-- restricted root access
-- controlled sudo privileges
-- secure file ownership and permissions
-- separation of secrets from source control
-- no real credentials or private keys in Git
-- synthetic application data only
-- tested backup restoration
-- documented recovery procedures
+- named administrator access instead of normal root login;
+- SSH key authentication and SSH hardening;
+- UFW deny-by-default inbound policy;
+- host Nginx as the approved application entry point;
+- loopback-only application backend exposure;
+- least-privilege file ownership and permissions;
+- non-privileged application container operation;
+- no real credentials or private keys in Git;
+- synthetic application data only;
+- documented backup and recovery procedures.
+
+Docker access is treated as privileged. The project does not claim production high availability, public cloud security or multi-server resilience.
 
 ## Repository Structure
 
 ```text
-sentinelops-linux-infrastructure/
-├── README.md
-├── LICENSE
-├── .gitignore
-└── docs/
-    ├── phase-0/
-    │   ├── project-charter.md
-    │   ├── requirements.md
-    │   ├── risk-register.md
-    │   └── success-criteria.md
-    ├── architecture/
-    │   ├── architecture.md
-    │   ├── network-design.md
-    │   └── diagrams/
-    ├── security/
-    │   ├── threat-model.md
-    │   └── security-baseline.md
-    └── adr/
+.
+├── .github/workflows/ci.yml
+├── docs/
+│   ├── adr/
+│   ├── architecture/
+│   ├── phase-0/
+│   ├── phase-1/
+│   ├── phase-2/
+│   ├── phase-3/
+│   ├── phase-4/
+│   └── security/
+└── provision/
+    ├── application/
+    ├── backup/
+    ├── monitoring/
+    ├── nginx/
+    ├── scripts/
+    ├── ssh/
+    ├── systemd/
+    └── README.md
 ```
 
-Additional application, automation, monitoring, testing, and CI directories will be created only when their development phases begin.
+## Validation and Evidence
+
+The repository contains documented evidence for:
+
+- manual Linux and security configuration;
+- Nginx and backend isolation;
+- application health;
+- backup creation, integrity and restoration;
+- controlled application, backup and Nginx failures;
+- repeatable and idempotent provisioning;
+- shell validation and secret safety;
+- container configuration and application testing;
+- scheduled monitoring, reboot persistence and measured failure detection.
+
+Pull-request CI, merge verification and default-branch CI are separate completion gates. The completed SEN-028 and SEN-029 changes passed those gates.
 
 ## Development Principles
 
@@ -155,58 +209,52 @@ Every major infrastructure change should answer:
 
 1. What problem does this solve?
 2. Why is this technology being used?
-3. What exactly is being changed?
+3. What exactly is changing?
 4. How can the change be verified?
 5. What could fail?
 6. How can the change be reversed?
 7. How would the same problem be handled in a real organisation?
 
-Important infrastructure will first be understood manually before being automated.
+## Remaining MVP Work
 
-## Planned Development Phases
+The remaining finalisation work is deliberately separate from the completed implementation:
 
-### Phase 0
+- clean rebuild from a supported Ubuntu Server VM;
+- final MVP verification against the success criteria;
+- organised screenshots and runtime evidence;
+- final demonstration video;
+- criterion-by-criterion MVP completion audit.
 
-Discovery and planning.
+## Post-MVP Scope
 
-### Phase 1
+The following are deliberately excluded from the initial MVP:
 
-Manual Linux administration and security foundation.
+- Ansible;
+- Prometheus;
+- Node Exporter;
+- Grafana;
+- Terraform;
+- Kubernetes;
+- AWS or multi-server infrastructure;
+- public DNS and HTTPS deployment;
+- automatic remediation;
+- external alerting;
+- application architecture expansion.
 
-### Phase 2
+## Documentation
 
-Application platform with Docker and Nginx.
+Detailed evidence and decisions are documented in:
 
-### Phase 3
-
-Repeatable provisioning automation.
-
-### Phase 4
-
-Monitoring and operational logging.
-
-### Phase 5
-
-Backup and recovery.
-
-### Phase 6
-
-Failure simulation and incident response.
-
-### Phase 7
-
-CI validation and MVP release.
-
-### Phase 8
-
-Optional advanced infrastructure and cloud deployment.
-
-## Project Status
-
-SentinelOps is currently under active development.
-
-Current milestone:
-
-```text
-Phase 0
-```
+- `docs/architecture/architecture.md`;
+- `docs/architecture/network-design.md`;
+- `docs/security/security-baseline.md`;
+- `docs/security/threat-model.md`;
+- `docs/phase-2/automated-monitoring-baseline.md`;
+- `docs/phase-2/resource-monitoring-logging-baseline.md`;
+- `docs/phase-3/application-container-failure-simulation.md`;
+- `docs/phase-3/backup-workflow-failure-simulation.md`;
+- `docs/phase-3/host-nginx-failure-simulation.md`;
+- `docs/phase-4/repeatable-provisioning-baseline.md`;
+- `docs/phase-4/provisioning-idempotency-validation-baseline.md`;
+- `docs/phase-4/github-actions-ci-baseline.md`;
+- `provision/README.md`.
